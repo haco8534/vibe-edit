@@ -10,6 +10,11 @@ Usage:
 
 from manim import *
 import numpy as np
+import json
+import os
+import difflib
+
+config.sound = True
 
 # ============================================================================
 # カラー定数（ホワイトテーマ）
@@ -26,15 +31,38 @@ TEXT_DIM = "#868e96"         # 薄めグレー
 CHAR_METAN = "#d6336c"       # めたんの色（ローズピンク）
 CHAR_ZUNDA = "#099268"       # ずんだもんの色（ディープグリーン）
 
+# 音声マップ読み込み
+AUDIO_MAP = {}
+map_path = "projects/api_explanation/media/audio/audio_map.json"
+if os.path.exists(map_path):
+    try:
+        with open(map_path, "r", encoding="utf-8") as f:
+            AUDIO_MAP = json.load(f)
+    except Exception as e:
+        print(f"Failed to load audio map: {e}")
+
 # ============================================================================
 # ヘルパー関数
 # ============================================================================
+
+def wrap_text(text, max_chars=28):
+    """長いテキストを自動改行する。句読点やスペース付近で折り返す"""
+    if len(text) <= max_chars:
+        return text
+    mid = len(text) // 2
+    for offset in range(min(mid, 12)):
+        for pos in [mid + offset, mid - offset]:
+            if 0 < pos < len(text) and text[pos] in '、。！？ ,. ':
+                return text[:pos + 1] + '\n' + text[pos + 1:]
+    return text[:mid] + '\n' + text[mid:]
+
 
 def get_subtitle(speaker, text, speaker_color=TEXT_MAIN):
     """字幕を返す。話者名（上段）+ セリフ（下段）を中央揃えで配置"""
     name = Text(speaker, font="Noto Sans JP", font_size=20,
                 color=speaker_color, weight=BOLD)
-    line = Text(text, font="Noto Sans JP", font_size=22, color=TEXT_MAIN)
+    wrapped = wrap_text(text)
+    line = Text(wrapped, font="Noto Sans JP", font_size=22, color=TEXT_MAIN)
     content = VGroup(name, line).arrange(DOWN, buff=0.15, center=True)
     bg = RoundedRectangle(
         corner_radius=0.1,
@@ -49,13 +77,70 @@ def get_subtitle(speaker, text, speaker_color=TEXT_MAIN):
 
 
 def show_subtitle(scene, speaker, text, speaker_color=TEXT_MAIN, duration=3.0, prev_sub=None):
-    """字幕を表示し、前の字幕があれば消す"""
+    """字幕を表示し、前の字幕があれば消す (音声があれば再生: ファジーマッチング)"""
+    # シーンごとの音声インデックス管理
+    if not hasattr(scene, "speech_index"):
+        scene.speech_index = 0
+    
+    scene_name = scene.__class__.__name__
+    key = scene_name.split("_")[0]
+    audio_data = None
+    
+    # マップから音声情報を検索
+    if key in AUDIO_MAP:
+        try:
+            audio_list = AUDIO_MAP[key]
+            
+            # 検索範囲: 現在位置から5つ先まで
+            start_idx = scene.speech_index
+            end_idx = min(len(audio_list), start_idx + 5)
+            candidates = audio_list[start_idx:end_idx]
+            
+            best_match = None
+            highest_ratio = 0.0
+            match_offset = 0
+            
+            for i, cand in enumerate(candidates):
+                # 類似度計算
+                ratio = difflib.SequenceMatcher(None, text, cand["text"]).ratio()
+                if ratio > highest_ratio:
+                    highest_ratio = ratio
+                    best_match = cand
+                    match_offset = i
+            
+            # 類似度しきい値 (0.2以上なら採用)
+            if highest_ratio > 0.2:
+                audio_data = best_match
+                # マッチした位置の次へインデックスを進める
+                scene.speech_index = start_idx + match_offset + 1
+            else:
+                # マッチしない場合は何もしない（次の検索に委ねる）
+                # print(f"DEBUG: No match found for '{text[:10]}...'")
+                pass
+
+        except Exception as e:
+            print(f"Audio lookup error: {e}")
+
+    wait_time = duration
+    
+    # 音声再生
+    if audio_data:
+        file_path = audio_data["file"]
+        if os.path.exists(file_path):
+            # Manimでのパス解決のために相対パスに変換
+            rel_path = os.path.relpath(file_path, os.getcwd())
+            scene.add_sound(rel_path)
+            wait_time = audio_data["duration"]
+
     sub = get_subtitle(speaker, text, speaker_color)
     anims = [FadeIn(sub, shift=UP * 0.1)]
     if prev_sub is not None:
         anims.append(FadeOut(prev_sub))
+    
     scene.play(*anims, run_time=0.4)
-    scene.wait(duration)
+    # 音声の長さだけ待つ (少し余韻)
+    scene.wait(wait_time + 0.2)
+    
     return sub
 
 
@@ -429,14 +514,6 @@ class Scene05_JSON(Scene):
             CHAR_METAN, duration=5, prev_sub=sub1)
 
         # JSONコードの表示
-        json_str = """{
-  "name": "ずんだもん",
-  "age": 5,
-  "favorite": "ずんだ餅",
-  "skills": ["弓道", "変身"],
-  "is_human": false
-}"""
-        # JSONコードの表示 (Textオブジェクトで代用)
         json_str_display = """{
   "name": "ずんだもん",
   "age": 5,
@@ -457,9 +534,6 @@ class Scene05_JSON(Scene):
             "おお、なんか読めるのだ！ 「名前：ずんだもん」って書いてあるのだ",
             CHAR_ZUNDA, duration=5, prev_sub=sub2)
 
-        # ハイライト用の枠（Codeオブジェクトの構造依存を避けるためコメントアウト）
-        # highlight_rect = SurroundingRectangle(code_obj.code.chars[0][3:19], color=ACCENT_RED, buff=0.05)
-        
         # ハイライト用の矢印
         arrow = Arrow(RIGHT*2.5, code_group.get_right() + UP*0.5, color=ACCENT_RED)
         label = Text("Key: Value のペア", font="Noto Sans JP", font_size=20, color=ACCENT_RED)
@@ -581,7 +655,7 @@ class Scene07_WhyAPI(Scene):
 
         sub4 = show_subtitle(self, "めたん",
             "Google Maps APIなどを使えば、巨人の肩に乗ることができます",
-            CHAR_METAN, duration=5, prev_sub=sub3)
+            CHAR_METAN, duration=5, prev_sub=sub4)
 
         self.play(
             FadeIn(api1, shift=DOWN),

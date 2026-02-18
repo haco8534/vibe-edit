@@ -9,3 +9,9 @@ projects/*/temp_media/
 outputs/*.mp4
 *.log
 temp_code.json
+*.wav
+*.mp3
+# Exclude generated images but keep source assets if any
+projects/*/media/
+projects/*/temp_media/
+projects/*/__pycache__/

@@ -53,7 +53,8 @@ def run_render(project_name, scene_name, quality):
     if miktex_bin not in env["PATH"]:
         env["PATH"] += f";{miktex_bin}"
     
-    result = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    # 出力をリアルタイム表示
+    result = subprocess.run(cmd, env=env, capture_output=False, text=True)
     
     elapsed = time.time() - start_time
     status = "SUCCESS" if result.returncode == 0 else "FAILED"
