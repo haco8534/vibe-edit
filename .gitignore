@@ -3,7 +3,6 @@ __pycache__/
 media/
 .venv/
 venv/
-reference/3b1b_videos/
 projects/*/media/
 projects/*/temp_media/
 outputs/*.mp4
